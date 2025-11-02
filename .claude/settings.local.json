@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_game.py:*)",
+      "Bash(dir /B *.py *.md *.txt *.json 2)",
+      "Bash(nul)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
