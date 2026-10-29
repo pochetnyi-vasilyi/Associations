@@ -173,8 +173,9 @@ class AssociationsGame:
         """Рассчитать очки за правильный ответ"""
         config = GameConfig.get_config(self.difficulty)
 
-        # Базовые очки: попытки × сложность × 100
-        base_score = self.attempts_left * config['multiplier'] * 100
+        # Базовые очки: попытки (включая текущую) × сложность × 100
+        # make_guess уже вычел текущую попытку из attempts_left
+        base_score = (self.attempts_left + 1) * config['multiplier'] * 100
 
         # Бонус за угадывание с первой попытки
         if self.attempts_left == config['attempts'] - 1:
