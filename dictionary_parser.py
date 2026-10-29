@@ -11,6 +11,13 @@ DEFAULT_DICTIONARY_PATH = os.path.join(
     'Русский Региональный Ассоциативный СловарьТезаурус.txt'
 )
 
+# Начало словарной статьи: СТИМУЛ заглавными буквами и двоеточие
+ENTRY_RE = re.compile(r'^([А-ЯЁA-Z][А-ЯЁA-Z \-]*):\s*(.*)$')
+# Конец словарной статьи: итоговые показатели вида 538+201+18+135
+STATS_RE = re.compile(r'\d+\+\d+\+\d+\+\d+\s*$')
+# Номер страницы на отдельной строке
+PAGE_NUMBER_RE = re.compile(r'^\d+$')
+
 
 class DictionaryParser:
     """Класс для парсинга ассоциативного словаря"""
@@ -27,102 +34,78 @@ class DictionaryParser:
         }
         """
         current_word = None
+        entry_lines = []
 
         with open(self.filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
 
-                # Пропускаем пустые строки и заголовки
-                if not line or line.startswith('Г.А.') or line.startswith('РУССКИЙ'):
+                # Пропускаем пустые строки и номера страниц
+                if not line or PAGE_NUMBER_RE.match(line):
                     continue
 
-                # Проверяем, является ли строка началом новой словарной статьи
-                # Словарная статья начинается с ЗАГЛАВНОГО слова, за которым следует двоеточие
-                if ':' in line and self._is_dictionary_entry(line):
-                    # Разбираем словарную статью
-                    word, associations = self._parse_entry(line)
-                    if word and associations:
-                        current_word = word
-                        self.dictionary[current_word] = associations
-                elif current_word and ';' in line:
-                    # Продолжение предыдущей словарной статьи
-                    additional_assoc = self._parse_continuation(line)
-                    if additional_assoc:
-                        self.dictionary[current_word].extend(additional_assoc)
+                match = ENTRY_RE.match(line)
+                if match:
+                    # Начало новой словарной статьи
+                    current_word = match.group(1).strip()
+                    entry_lines = [match.group(2)]
+                elif current_word:
+                    # Продолжение текущей статьи
+                    entry_lines.append(line)
+                else:
+                    # Титул, вступление и буквы-разделители между статьями
+                    continue
+
+                # Статья заканчивается итоговыми показателями
+                if STATS_RE.search(line):
+                    text = STATS_RE.sub('', self._join_lines(entry_lines))
+                    self.dictionary[current_word] = self._parse_associations(text)
+                    current_word = None
 
         return self.dictionary
 
-    def _is_dictionary_entry(self, line: str) -> bool:
-        """Проверяет, является ли строка началом словарной статьи"""
-        # Словарная статья обычно начинается с ЗАГЛАВНОГО слова или слова с заглавной буквы
-        parts = line.split(':')
-        if len(parts) < 2:
-            return False
-
-        word_candidate = parts[0].strip()
-
-        # Проверяем, что это не продолжение текста и не служебная информация
-        if any(keyword in word_candidate for keyword in ['том', 'Том', 'Структура', 'словаря']):
-            return False
-
-        return True
-
-    def _parse_entry(self, line: str) -> Tuple[str, List[Tuple[str, int]]]:
-        """
-        Парсит одну словарную статью
-        Формат: СЛОВО: ассоциация1 частота1; ассоциация2 частота2; ...
-        """
-        parts = line.split(':', 1)
-        if len(parts) < 2:
-            return None, []
-
-        word = parts[0].strip()
-        associations_str = parts[1].strip()
-
-        associations = self._parse_associations(associations_str)
-
-        return word, associations
-
-    def _parse_continuation(self, line: str) -> List[Tuple[str, int]]:
-        """Парсит продолжение словарной статьи"""
-        return self._parse_associations(line)
+    def _join_lines(self, lines: List[str]) -> str:
+        """Склеивает строки статьи; после дефиса перенос без пробела (по-/любому)"""
+        text = ''
+        for line in lines:
+            if not text or text.endswith('-'):
+                text += line
+            else:
+                text += ' ' + line
+        return text
 
     def _parse_associations(self, text: str) -> List[Tuple[str, int]]:
         """
-        Парсит строку с ассоциациями
+        Парсит текст статьи с ассоциациями
         Формат: ассоциация1, ассоциация2 частота; ассоциация3 частота; ...
         """
         associations = []
+        # Ассоциации из кусков без частоты (в словаре ';' вместо ',')
+        # получают частоту следующей группы
+        pending = []
 
-        # Разделяем по точке с запятой
-        parts = text.split(';')
-
-        for part in parts:
+        for part in text.split(';'):
             part = part.strip()
             if not part:
                 continue
 
-            # Ищем последнее число в строке (это частота)
-            # Используем регулярное выражение для поиска числа в конце
-            match = re.search(r'\s+(\d+)\s*$', part)
+            # Частота - число в конце группы
+            match = re.search(r'\s(\d+)$', part)
 
             if match:
                 frequency = int(match.group(1))
-                # Всё, что до числа - это ассоциации (могут быть через запятую)
-                assoc_text = part[:match.start()].strip()
-
-                # Разделяем ассоциации по запятой
-                assoc_list = [a.strip() for a in assoc_text.split(',') if a.strip()]
-
                 # Каждая ассоциация в группе имеет одинаковую частоту
-                for assoc in assoc_list:
+                for assoc in pending + self._split_group(part[:match.start()]):
                     associations.append((assoc, frequency))
-            elif part and not part.endswith('+'):
-                # Если нет числа и это не статистическая строка
-                # проверяем, не является ли это частью формата "слово1, слово2, словоN число"
-                continue
+                pending = []
+            else:
+                pending.extend(self._split_group(part))
 
         return associations
+
+    def _split_group(self, text: str) -> List[str]:
+        """Делит группу по запятым; {,} - запятая внутри самой ассоциации"""
+        return [a.strip().replace('\0', ',') for a in text.replace('{,}', '\0').split(',') if a.strip()]
 
     def get_words(self) -> List[str]:
         """Возвращает список всех слов в словаре"""
