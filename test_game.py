@@ -1,8 +1,11 @@
 """
 Тестовый скрипт для проверки работы игры
 """
+import os
+import re
+import sys
 from dictionary_parser import DictionaryParser
-from game_logic import AssociationsGame, Difficulty
+from game_logic import AssociationsGame, Difficulty, GameConfig
 from player_stats import PlayerStats
 
 
@@ -26,6 +29,17 @@ def test_parser():
             print(f"  Всего ассоциаций: {len(assoc)}")
             print(f"  Топ-5: {assoc[:5]}")
 
+    assert parser.get_word_count() == 1000, "в словаре 1000 стимулов"
+    assert all(re.fullmatch(r'[А-ЯЁ \-]+', word) for word in dictionary), "стимулы - слова заглавными буквами"
+    # Число разных реакций - из итоговых строк статей (538+201+18+135, 546+124+3+75)
+    assert len(dictionary['АБСОЛЮТНЫЙ']) == 201
+    assert len(dictionary['АВТОМАТ']) == 124
+    assert dictionary['АВТОМАТ'][0] == ('Калашникова', 152)
+    assert ('по-любому', 1) in dictionary['АБСОЛЮТНЫЙ'], "перенос строки после дефиса"
+    assert ('черный, стреляет', 1) in dictionary['АВТОМАТ'], "{,} - запятая внутри ассоциации"
+    assert ('Россия', 7) in dictionary['РУССКИЙ'], "статья РУССКИЙ не пропущена"
+    assert ('Россия', 7) not in dictionary['РУКИ'], "реакции РУССКИЙ не попали в РУКИ"
+
     return parser, dictionary
 
 
@@ -40,29 +54,42 @@ def test_game_logic(dictionary):
     # Тестируем каждый уровень сложности
     for difficulty in [Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD, Difficulty.EXPERT]:
         print(f"\nТест уровня {difficulty.name}:")
+        config = GameConfig.get_config(difficulty)
 
-        if game.start_new_round(difficulty):
-            print(f"  Загаданное слово: {game.current_word}")
-            print(f"  Попыток: {game.attempts_left}")
-            print(f"  Ассоциации для показа: {len(game.current_associations)}")
+        assert game.start_new_round(difficulty), f"не удалось начать раунд для уровня {difficulty.name}"
+        print(f"  Загаданное слово: {game.current_word}")
+        print(f"  Попыток: {game.attempts_left}")
+        print(f"  Ассоциации для показа: {len(game.current_associations)}")
 
-            # Показываем все ассоциации
-            for i in range(len(game.current_associations)):
-                assoc = game.reveal_next_association()
-                if assoc:
-                    print(f"    {i+1}. {assoc[0]} (частота: {assoc[1]})")
+        # Показываем все ассоциации
+        for i in range(len(game.current_associations)):
+            assoc = game.reveal_next_association()
+            if assoc:
+                print(f"    {i+1}. {assoc[0]} (частота: {assoc[1]})")
 
-            # Проверяем систему подсказок
-            hint = game.get_hint()
-            print(f"  Подсказка: {hint}")
+        frequencies = [freq for _, freq in game.shown_associations]
+        assert len(frequencies) == config['associations_count']
+        assert all(freq >= config['min_frequency'] for freq in frequencies)
+        assert frequencies == sorted(frequencies), "ассоциации открываются от редких к частым"
 
-            # Проверяем расчет очков
-            # Симулируем правильный ответ
-            game.attempts_left = 3  # Оставляем 3 попытки
-            correct, points = game.make_guess(game.current_word)
-            print(f"  Правильный ответ дает {points} очков")
-        else:
-            print(f"  ОШИБКА: Не удалось начать раунд для уровня {difficulty.name}")
+        # Проверяем систему подсказок
+        hint = game.get_hint()
+        print(f"  Подсказка: {hint}")
+        assert hint == game.current_word[:1] + '...'
+
+        # Проверяем расчет очков: первая попытка, одна подсказка
+        correct, points = game.make_guess(game.current_word.lower())
+        print(f"  Правильный ответ с первой попытки дает {points} очков")
+        assert correct
+        assert points == config['attempts'] * config['multiplier'] * 100 + 500 - 100
+
+        # Победа с последней попытки тоже дает очки
+        game.start_new_round(difficulty)
+        for _ in range(config['attempts'] - 1):
+            game.make_guess('неверный ответ')
+        correct, points = game.make_guess(game.current_word)
+        print(f"  Правильный ответ с последней попытки дает {points} очков")
+        assert correct and points == config['multiplier'] * 100
 
     return game
 
@@ -73,7 +100,9 @@ def test_stats():
     print("ТЕСТ СИСТЕМЫ СТАТИСТИКИ")
     print("=" * 60)
 
-    # Создаем временный файл статистики для теста
+    # Создаем временный файл статистики для теста (остаток прошлого запуска удаляем)
+    if os.path.exists('test_stats.json'):
+        os.remove('test_stats.json')
     stats = PlayerStats('test_stats.json')
 
     # Добавляем тестового игрока
@@ -116,8 +145,14 @@ def test_stats():
         result = "+" if game['won'] else "-"
         print(f"  {i}. [{result}] {game['difficulty']} - {game['word']} ({game['score']} очков)")
 
+    assert player_stats['games_played'] == 4
+    assert player_stats['games_won'] == 3 and player_stats['games_lost'] == 1
+    assert player_stats['total_score'] == 3500 and player_stats['best_score'] == 1500
+    assert player_stats['difficulty_stats']['HARD'] == {'played': 1, 'won': 0}
+    assert leaderboard[0]['name'] == test_player and leaderboard[0]['win_rate'] == 75.0
+    assert [game['word'] for game in history] == ['АВТОМАТ', 'АБСОЛЮТНЫЙ', 'АКТИВНЫЙ'], "история от новых к старым"
+
     # Очищаем тестовый файл
-    import os
     if os.path.exists('test_stats.json'):
         os.remove('test_stats.json')
         print("\nТестовый файл статистики удален")
@@ -148,6 +183,7 @@ def main():
         print(f"\nОШИБКА ПРИ ТЕСТИРОВАНИИ: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
