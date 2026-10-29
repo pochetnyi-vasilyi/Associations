@@ -4,7 +4,7 @@
 """
 import os
 import sys
-from dictionary_parser import DictionaryParser
+from dictionary_parser import DictionaryParser, DEFAULT_DICTIONARY_PATH
 from game_logic import AssociationsGame, Difficulty
 from player_stats import PlayerStats
 
@@ -13,7 +13,7 @@ class AssociationsGameUI:
     """Пользовательский интерфейс игры"""
 
     def __init__(self):
-        self.dictionary_path = r'c:\GitHub\Associations\Русский Региональный Ассоциативный СловарьТезаурус.txt'
+        self.dictionary_path = DEFAULT_DICTIONARY_PATH
         self.parser = None
         self.game = None
         self.stats = PlayerStats()

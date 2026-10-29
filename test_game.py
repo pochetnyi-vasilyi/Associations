@@ -12,7 +12,7 @@ def test_parser():
     print("ТЕСТ ПАРСЕРА")
     print("=" * 60)
 
-    parser = DictionaryParser(r'c:\GitHub\Associations\Русский Региональный Ассоциативный СловарьТезаурус.txt')
+    parser = DictionaryParser()
     dictionary = parser.parse()
 
     print(f"Загружено слов: {parser.get_word_count()}")

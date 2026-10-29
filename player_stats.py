@@ -6,11 +6,14 @@ import os
 from datetime import datetime
 from typing import Dict, List
 
+# Путь к файлу статистики относительно папки проекта
+DEFAULT_STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'player_stats.json')
+
 
 class PlayerStats:
     """Класс для управления статистикой игроков"""
 
-    def __init__(self, stats_file: str = 'player_stats.json'):
+    def __init__(self, stats_file: str = DEFAULT_STATS_PATH):
         self.stats_file = stats_file
         self.stats = self._load_stats()
 

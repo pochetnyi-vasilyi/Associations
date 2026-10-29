@@ -1,14 +1,21 @@
 """
 Парсер для русского ассоциативного словаря-тезауруса
 """
+import os
 import re
 from typing import Dict, List, Tuple
+
+# Путь к словарю относительно папки проекта
+DEFAULT_DICTIONARY_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'Русский Региональный Ассоциативный СловарьТезаурус.txt'
+)
 
 
 class DictionaryParser:
     """Класс для парсинга ассоциативного словаря"""
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str = DEFAULT_DICTIONARY_PATH):
         self.filepath = filepath
         self.dictionary: Dict[str, List[Tuple[str, int]]] = {}
 
@@ -132,7 +139,7 @@ class DictionaryParser:
 
 if __name__ == '__main__':
     # Тестирование парсера
-    parser = DictionaryParser(r'c:\GitHub\Associations\Русский Региональный Ассоциативный СловарьТезаурус.txt')
+    parser = DictionaryParser()
     dictionary = parser.parse()
 
     print(f"Загружено слов: {parser.get_word_count()}")
