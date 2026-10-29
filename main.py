@@ -6,7 +6,7 @@ import os
 import sys
 from dictionary_parser import DictionaryParser, DEFAULT_DICTIONARY_PATH
 from game_logic import AssociationsGame, Difficulty
-from player_stats import PlayerStats
+from player_stats import PlayerStats, StatsImportError
 
 
 class AssociationsGameUI:
@@ -273,6 +273,35 @@ class AssociationsGameUI:
 
         input("\nНажмите Enter для продолжения...")
 
+    def export_stats(self):
+        """Экспортировать статистику всех игроков в файл"""
+        filename = input("\nИмя файла для экспорта: ").strip()
+        if filename and self.stats.export_stats(filename):
+            print(f"Статистика сохранена в {filename}")
+        else:
+            print("Не удалось сохранить статистику!")
+        input("\nНажмите Enter для продолжения...")
+
+    def import_stats(self):
+        """Импортировать статистику из файла (существующие игроки не перезаписываются)"""
+        filename = input("\nИмя файла для импорта: ").strip()
+        if not filename:
+            print("Имя файла не указано!")
+        else:
+            try:
+                result = self.stats.import_stats(filename)
+            except StatsImportError as e:
+                print(f"Не удалось импортировать статистику: {e}")
+            else:
+                print(f"Импортировано игроков: {len(result['imported'])}")
+                if result['existing']:
+                    print(f"Уже есть, пропущены: {', '.join(result['existing'])}")
+                if result['invalid']:
+                    print("Пропущены из-за ошибок в данных:")
+                    for error in result['invalid']:
+                        print(f"  {error}")
+        input("\nНажмите Enter для продолжения...")
+
     def main_menu(self):
         """Главное меню"""
         while True:
@@ -290,7 +319,9 @@ class AssociationsGameUI:
             print("2. Моя статистика")
             print("3. Таблица лидеров")
             print("4. Сменить игрока")
-            print("5. Выход")
+            print("5. Экспорт статистики")
+            print("6. Импорт статистики")
+            print("7. Выход")
 
             choice = input("\n> ").strip()
 
@@ -304,6 +335,10 @@ class AssociationsGameUI:
             elif choice == '4':
                 self.select_player()
             elif choice == '5':
+                self.export_stats()
+            elif choice == '6':
+                self.import_stats()
+            elif choice == '7':
                 print("\nСпасибо за игру! До встречи!")
                 sys.exit(0)
             else:

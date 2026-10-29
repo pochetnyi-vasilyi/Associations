@@ -9,6 +9,18 @@ from typing import Dict, List
 # Путь к файлу статистики относительно папки проекта
 DEFAULT_STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'player_stats.json')
 
+DIFFICULTIES = ('EASY', 'MEDIUM', 'HARD', 'EXPERT')
+COUNTERS = ('total_score', 'games_played', 'games_won', 'games_lost', 'best_score')
+
+
+class StatsImportError(Exception):
+    """Файл нельзя импортировать: не прочитан или не в формате статистики"""
+
+
+def _is_count(value) -> bool:
+    """Целое неотрицательное число (bool не считается)"""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
 
 class PlayerStats:
     """Класс для управления статистикой игроков"""
@@ -179,18 +191,82 @@ class PlayerStats:
         except IOError:
             return False
 
-    def import_stats(self, filename: str):
-        """Импортировать статистику из файла"""
+    def import_stats(self, filename: str) -> Dict[str, List[str]]:
+        """
+        Импортировать статистику из файла
+
+        Игроки, которые уже есть, и записи с ошибками пропускаются
+
+        Returns:
+            {'imported': [имена], 'existing': [имена], 'invalid': ['«имя»: причина', ...]}
+
+        Raises:
+            StatsImportError: файл не прочитан или не в формате статистики
+        """
         try:
-            with open(filename, 'r', encoding='utf-8') as f:
+            # utf-8-sig читает и файлы с BOM (Блокнот Windows)
+            with open(filename, 'r', encoding='utf-8-sig') as f:
                 imported_stats = json.load(f)
+        except FileNotFoundError:
+            raise StatsImportError(f"файл {filename} не найден")
+        except UnicodeDecodeError:
+            raise StatsImportError("файл не в кодировке UTF-8")
+        except json.JSONDecodeError as e:
+            raise StatsImportError(f"файл не в формате JSON (строка {e.lineno}, столбец {e.colno})")
+        except OSError as e:
+            raise StatsImportError(f"не удалось прочитать файл: {e.strerror or e}")
 
-            # Объединяем статистику (если игрок уже существует, оставляем текущую)
-            for player_name, player_data in imported_stats.get('players', {}).items():
-                if player_name not in self.stats['players']:
-                    self.stats['players'][player_name] = player_data
+        if not isinstance(imported_stats, dict) or not isinstance(imported_stats.get('players'), dict):
+            raise StatsImportError('в файле нет списка игроков {"players": {...}}')
 
+        result = {'imported': [], 'existing': [], 'invalid': []}
+
+        # Объединяем статистику (если игрок уже существует, оставляем текущую)
+        for player_name, player_data in imported_stats['players'].items():
+            if player_name in self.stats['players']:
+                result['existing'].append(player_name)
+                continue
+
+            error = self._validate_player(player_name, player_data)
+            if error:
+                result['invalid'].append(f"«{player_name}»: {error}")
+            else:
+                self.stats['players'][player_name] = player_data
+                result['imported'].append(player_name)
+
+        if result['imported']:
             self._save_stats()
-            return True
-        except (IOError, json.JSONDecodeError):
-            return False
+        return result
+
+    @staticmethod
+    def _validate_player(player_name: str, player_data) -> str | None:
+        """Проверить запись игрока из импортируемого файла; вернуть описание ошибки или None"""
+        if not player_name.strip():
+            return "пустое имя игрока"
+        if not isinstance(player_data, dict):
+            return "запись игрока - не объект"
+
+        for key in COUNTERS:
+            if not _is_count(player_data.get(key)):
+                return f"поле {key} - не целое неотрицательное число"
+
+        difficulty_stats = player_data.get('difficulty_stats')
+        if not isinstance(difficulty_stats, dict) or not set(DIFFICULTIES) <= difficulty_stats.keys():
+            return "в difficulty_stats нет всех уровней сложности"
+        for difficulty, level in difficulty_stats.items():
+            if not (isinstance(level, dict) and _is_count(level.get('played')) and _is_count(level.get('won'))):
+                return f"неверная статистика уровня {difficulty}"
+
+        history = player_data.get('history')
+        if not isinstance(history, list):
+            return "поле history - не список"
+        for game in history:
+            if not (isinstance(game, dict)
+                    and isinstance(game.get('date'), str)
+                    and isinstance(game.get('difficulty'), str)
+                    and isinstance(game.get('won'), bool)
+                    and _is_count(game.get('score'))
+                    and isinstance(game.get('word'), str)):
+                return "неверная запись в history"
+
+        return None

@@ -1,12 +1,14 @@
 """
 Тестовый скрипт для проверки работы игры
 """
+import json
 import os
 import re
 import sys
+import tempfile
 from dictionary_parser import DictionaryParser
 from game_logic import AssociationsGame, Difficulty, GameConfig
-from player_stats import PlayerStats
+from player_stats import PlayerStats, StatsImportError
 
 
 def test_parser():
@@ -160,6 +162,68 @@ def test_stats():
     return stats
 
 
+def test_import():
+    """Тестирование импорта статистики"""
+    print("\n" + "=" * 60)
+    print("ТЕСТ ИМПОРТА СТАТИСТИКИ")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Файл для импорта: два корректных игрока и два с ошибками в данных
+        source = PlayerStats(os.path.join(tmp, 'source.json'))
+        for name in ('Иван', 'Пётр', 'Сломанный', 'БезИстории'):
+            source.record_game(name, 'EASY', True, 1000, 'АВТОМАТ')
+        source.stats['players']['Сломанный']['games_played'] = '5'
+        source.stats['players']['БезИстории']['history'] = None
+        assert source.export_stats(os.path.join(tmp, 'import.json'))
+
+        stats_file = os.path.join(tmp, 'stats.json')
+        stats = PlayerStats(stats_file)
+        stats.add_player('Иван')
+        result = stats.import_stats(os.path.join(tmp, 'import.json'))
+        print(f"Результат импорта: {result}")
+
+        assert result['imported'] == ['Пётр']
+        assert result['existing'] == ['Иван']
+        assert [error.split(':')[0] for error in result['invalid']] == ['«Сломанный»', '«БезИстории»']
+        assert 'Сломанный' not in stats.get_all_players()
+        assert PlayerStats(stats_file).get_player_stats('Пётр')['total_score'] == 1000, "импорт сохранен в файл"
+        stats.get_leaderboard()
+
+        # Файлы, которые нельзя импортировать
+        bad_files = {
+            'missing.json': None,
+            'broken.json': b'{"players": ',
+            'cp1251.json': '{"players": {"Иван": {}}}'.encode('cp1251'),
+            'list.json': b'[]',
+            'players_list.json': b'{"players": []}',
+        }
+        for name, content in bad_files.items():
+            path = os.path.join(tmp, name)
+            if content is not None:
+                with open(path, 'wb') as f:
+                    f.write(content)
+            try:
+                stats.import_stats(path)
+            except StatsImportError as e:
+                print(f"  {name}: {e}")
+            else:
+                raise AssertionError(f"{name} импортирован без ошибки")
+
+        try:
+            stats.import_stats(tmp)
+        except StatsImportError as e:
+            print(f"  папка вместо файла: {e}")
+        else:
+            raise AssertionError("папка импортирована без ошибки")
+
+        # Файл с BOM (Блокнот Windows) импортируется
+        bom_file = os.path.join(tmp, 'bom.json')
+        with open(bom_file, 'w', encoding='utf-8-sig') as f:
+            json.dump({'players': {'Анна': source.get_player_stats('Пётр')}}, f, ensure_ascii=False)
+        assert stats.import_stats(bom_file)['imported'] == ['Анна']
+
+
 def main():
     """Главная функция тестирования"""
     print("\nЗАПУСК ТЕСТОВ ИГРЫ 'АССОЦИАЦИИ'\n")
@@ -173,6 +237,9 @@ def main():
 
         # Тест 3: Статистика
         stats = test_stats()
+
+        # Тест 4: Импорт статистики
+        test_import()
 
         print("\n" + "=" * 60)
         print("ВСЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО!")
