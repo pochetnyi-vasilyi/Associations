@@ -71,7 +71,7 @@ class AssociationsGameUI:
 
         if choice.isdigit() and 1 <= int(choice) <= len(players):
             self.current_player = players[int(choice) - 1]
-        elif choice:
+        elif choice and not choice.isdigit():
             self.current_player = choice
             self.stats.add_player(self.current_player)
         else:
